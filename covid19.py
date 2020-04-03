@@ -3,8 +3,8 @@ import datetime
 import json
 import requests
 
-from covid19_utils import date_parser, sanitize, fix_country
-
+from Covid19.utils import date_parser, sanitize, fix_country
+from Covid19.worldometers import Worldometers
 
 class GitHub:
     def __init__(self, owner, repo):
@@ -24,6 +24,7 @@ class GitHub:
 
     def get_file_list(self, path):
         url = f"https://api.github.com/repos/{self.__owner}/{self.__repo}/contents/{path}"
+        self.__current_url = url
         r = requests.get(url)
         return r.json()
 
@@ -35,10 +36,11 @@ class Covid19(GitHub):
     def __init__(self, owner, repo):
         GitHub.__init__(self, owner, repo)
         self.categories = ('confirmed', 'deaths', 'recovered')
-        self.countries = {}
+        self.__time_series_data = {}
+        self.__daily_reports_data = {}
         self.current_coordinates = None
         self.current_dates = {}
-        path = 'dades/covid19'
+        path = './data'
         self.__time_series_filename = f'{path}/covid19_time_series.json'
         self.__daily_reports_filename = f'{path}/covid19_daily_reports.json'
 
@@ -52,29 +54,29 @@ class Covid19(GitHub):
         return self.get_file_list(path)
 
     def __fill_country_data(self, country):
-        if not self.countries[country].get('latitude'):
-            self.countries[country]['latitude'] = self.current_coordinates['lt']
-            self.countries[country]['longitude'] = self.current_coordinates['ln']
-            self.countries[country]['dates'] = {}
+        if not self.__time_series_data[country].get('latitude'):
+            self.__time_series_data[country]['latitude'] = self.current_coordinates['lt']
+            self.__time_series_data[country]['longitude'] = self.current_coordinates['ln']
+            self.__time_series_data[country]['dates'] = {}
         for key in self.current_dates:
             date = datetime.datetime.strptime(key, '%m/%d/%y').strftime("%Y-%m-%d")
-            if not self.countries[country]['dates'].get(date):
-                self.countries[country]['dates'][date] = {}
-            self.countries[country]['dates'][date].update(
+            if not self.__time_series_data[country]['dates'].get(date):
+                self.__time_series_data[country]['dates'][date] = {}
+            self.__time_series_data[country]['dates'][date].update(
                 {self.current_coordinates['ct']:  int(self.current_dates.get(key))}
             )
 
     def __fill_province_data(self, country, province):
-        if not self.countries[country][province].get('latitude'):
-            self.countries[country][province]['country'] = country
-            self.countries[country][province]['latitude'] = self.current_coordinates['lt']
-            self.countries[country][province]['longitude'] = self.current_coordinates['ln']
-            self.countries[country][province]['dates'] = {}
+        if not self.__time_series_data[country][province].get('latitude'):
+            self.__time_series_data[country][province]['country'] = country
+            self.__time_series_data[country][province]['latitude'] = self.current_coordinates['lt']
+            self.__time_series_data[country][province]['longitude'] = self.current_coordinates['ln']
+            self.__time_series_data[country][province]['dates'] = {}
         for key in self.current_dates:
             date = datetime.datetime.strptime(key, '%m/%d/%y').strftime("%Y-%m-%d")
-            if not self.countries[country][province]['dates'].get(date):
-                self.countries[country][province]['dates'][date] = {}
-            self.countries[country][province]['dates'][date].update(
+            if not self.__time_series_data[country][province]['dates'].get(date):
+                self.__time_series_data[country][province]['dates'][date] = {}
+            self.__time_series_data[country][province]['dates'][date].update(
                 {self.current_coordinates['ct']:  int(self.current_dates.get(key))}
             )
 
@@ -90,17 +92,17 @@ class Covid19(GitHub):
                 self.current_coordinates = {'ct': category, 'lt': float(lat), 'ln': float(long)}
                 self.current_dates = keys
                 if province:
-                    if not self.countries.get(country):
-                        self.countries[country] = {province: {}}
-                    elif not self.countries[country].get(province):
-                        self.countries[country][province] = {}
+                    if not self.__time_series_data.get(country):
+                        self.__time_series_data[country] = {province: {}}
+                    elif not self.__time_series_data[country].get(province):
+                        self.__time_series_data[country][province] = {}
                     self.__fill_province_data(country, province)
                 else:
-                    if not self.countries.get(country):
-                        self.countries[country] = {}
+                    if not self.__time_series_data.get(country):
+                        self.__time_series_data[country] = {}
                     self.__fill_country_data(country)
         with open(self.__time_series_filename, 'w') as f:
-            json.dump(self.countries, f, indent=4)
+            json.dump(self.__time_series_data, f, indent=4)
 
     def download_daily_reports(self):
         places = {}
@@ -192,6 +194,7 @@ class Covid19(GitHub):
                                 places[admin1]['dates'][date] = data
         with open(self.__daily_reports_filename, 'w') as f:
             f.write(json.dumps(places, indent=2))
+        self.__daily_reports_data = places
 
     def __get_data(self, filename):
         with open(filename, 'r') as f:
@@ -203,26 +206,69 @@ class Covid19(GitHub):
     def get_daily_reports_data(self):
         return self.__get_data(self.__daily_reports_filename)
 
-    def compare(self):
-        """TODO: not ready"""
-        time_series = self.get_time_series_data()
-        daily_reports = self.get_daily_reports_data()
-        for country in time_series:
-            if country in daily_reports:
-                if time_series[country].get('dates'):
-                    for date in time_series[country]['dates']:
-                        if not time_series[country].get('dates'):
-                            for province in time_series[country]:
-                                if daily_reports[country].get(province):
-                                    if date in daily_reports[country][province]['dates']:
-                                        print(f"time_series country: {country} date: {date} data: {time_series[country][province]['dates'][date]}")
-                                        print(f"daily_reports country: {country} date: {date} data: {daily_reports[country][province]['dates'][date]}\n")
+    def __load_data(self):
+        self.__daily_reports_data = self.get_daily_reports_data()
+        self.__time_series_data = self.get_time_series_data()
+
+    def load_time_series_data(self):
+        self.__time_series_data = self.get_time_series_data()
+
+    def update(self):
+        self.download_time_series()
+        self.download_daily_reports()
+
+    def get_admins(self):
+        self.__load_data()
+        categories = ('latitude', 'longitude', 'dates', 'admin1', 'admin2')
+        admin1_stack = []
+        admin2_stack = []
+        admin3_stack = []
+        for admin1 in self.__daily_reports_data:
+            admin1_stack.append(admin1)
+            self.get_country_stats(admin1)
+            admin2_list = [a for a in self.__daily_reports_data[admin1] if a not in categories]
+            for admin2 in admin2_list:
+                admin2_stack.append(admin2)
+                admin3_list = [a for a in self.__daily_reports_data[admin1][admin2] if a not in categories]
+                for admin3 in admin3_list:
+                    admin3_stack.append(admin3)
+        print (len(admin1_stack), admin1_stack)
+        print (len(admin2_stack), admin2_stack)
+        print (len(admin3_stack), admin3_stack)
+
+    def get_country_stats(self, target):
+        if self.__time_series_data.get(target):
+            country = self.__time_series_data[target]
+            if country.get('dates'):
+                for date in country['dates']:
+                    data = country['dates'][date]
+                    print(f"\t{date}: {data}")
+        else:
+            print(f"unknown country ({target})")
+
+def __main():
+    import argparse
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument('-a', dest='admins', action='store_true')
+    argparser.add_argument('-c', dest='country')
+    argparser.add_argument('-u', dest='update', action='store_true')
+    argparser.add_argument('-w', dest='worldometers', action='store_true')
+    args = argparser.parse_args()
+
+    if args.update:
+        covid19.update()
+    elif args.admins:
+        covid19.get_admins()
+    elif args.country:
+        covid19.load_time_series_data()
+        covid19.get_country_stats(args.country)
+    if args.worldometers:
+        worldometers = Worldometers()
+        worldometers.save()
 
 
 if __name__ == '__main__':
     g_owner = "CSSEGISandData"
     g_repo = "COVID-19"
     covid19 = Covid19(g_owner, g_repo)
-    covid19.download_time_series()
-    covid19.download_daily_reports()
-
+    __main()
