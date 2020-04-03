@@ -23,23 +23,16 @@ class Worldometers:
             data.append(_clean_dict(row_dict))
         return data
 
-    def today_table(self):
-        return self.get_table('today')
-
-    def yesterday_table(self):
-        return self.get_table('yesterday')
-
-    def save(self):
-        today = date.today()
-        filename = today.strftime("./data/%Y-%m-%d.json")
-        data = self.today_table()
-        with open(filename, 'w') as f:
-            json.dump(data, f, indent=4)
-        yesterday = date.today() - timedelta(days=1)
-        data = self.yesterday_table()
-        filename = yesterday.strftime("./data/%Y-%m-%d.json")
-        with open(filename, 'w') as f:
-            json.dump(data, f, indent=4)
+    def get_tables(self):
+        items = {
+            'today': date.today(),
+            'yesterday': date.today() - timedelta(days=1)
+        }
+        for item in items:
+            data = self.get_table(item)
+            filename = items[item].strftime(".data/%Y-%m-%d.json")
+            with open(filename, 'w') as f:
+                json.dump(data, f, indent=4)
 
 
 def _clean_dict(d):
@@ -61,4 +54,4 @@ def _clean_dict(d):
 
 if __name__ == "__main__":
     worldmeters = Worldometers()
-    worldmeters.save()
+    worldmeters.get_tables()
