@@ -264,7 +264,7 @@ def __main():
         covid19.get_country_stats(args.country)
     if args.worldometers:
         worldometers = Worldometers()
-        worldometers.save()
+        worldometers.get_tables()
 
 
 if __name__ == '__main__':
