@@ -351,6 +351,7 @@ def __main():
     argparser = argparse.ArgumentParser()
     argparser.add_argument('-a', dest='admins', action='store_true')
     argparser.add_argument('-c', dest='country')
+    argparser.add_argument('-s', dest='spain', action='store_true')
     argparser.add_argument('-u', dest='update', action='store_true')
     argparser.add_argument('-w', dest='worldometers', action='store_true')
     argparser.add_argument('-W', dest='who', action='store_true')
@@ -364,6 +365,10 @@ def __main():
         covid19.load_time_series_data()
         covid19.get_country_stats(args.country)
 
+    if args.spain:
+        spain_covid19 = SpainCovid19('Eclectikus', g_repo)
+        spain_covid19.save_data()
+
     if args.who:
         covid19.download_who_time_series()
 
@@ -376,6 +381,4 @@ if __name__ == '__main__':
     g_owner = "CSSEGISandData"
     g_repo = "COVID-19"
     covid19 = Covid19(g_owner, g_repo)
-    spain_covid19 = SpainCovid19('Eclectikus',g_repo)
-    spain_covid19.save_data()
-    #__main()
+    __main()
