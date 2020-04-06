@@ -30,7 +30,7 @@ class Worldometers:
         }
         for item in items:
             data = self.get_table(item)
-            filename = f"./data/{items[item]:%Y-%m-%d}.json"
+            filename = f"./data/worldometers/{items[item]:%Y-%m-%d}.json"
             with open(filename, 'w') as f:
                 json.dump(data, f, indent=4)
 
