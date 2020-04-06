@@ -1,7 +1,7 @@
 import csv
 import datetime
 import json
-import requests
+import re, requests
 
 from Covid19.utils import date_parser, sanitize, fix_country
 from Covid19.worldometers import Worldometers
@@ -106,7 +106,7 @@ class Covid19(GitHub):
 
     def download_daily_reports(self):
         places = {}
-        for file in covid19.__get_daily_reports_files():
+        for file in self.__get_daily_reports_files():
             if file['name'].endswith('.csv'):
                 csv_dict = csv.DictReader(covid19.get_raw_file(file['download_url']).splitlines())
                 date = date_parser(file['name'].split('.')[0]).strftime('%Y-%m-%d')
@@ -196,6 +196,29 @@ class Covid19(GitHub):
             f.write(json.dumps(places, indent=2))
         self.__daily_reports_data = places
 
+    def __get_who_time_series_file(self):
+        path = 'who_covid_19_situation_reports/who_covid_19_sit_rep_time_series/'
+        filename = 'who_covid_19_sit_rep_time_series.csv'
+        return self.get_file_content(filename, path)
+
+    def download_who_time_series(self):
+        csv_reader = csv.DictReader(self.__get_who_time_series_file().splitlines())
+        for row_dict in csv_reader:
+            admin1 = row_dict.pop("Province/States")
+            admin2 = row_dict.pop('Country/Region')
+            admin3 = row_dict.pop('WHO region')
+            for date_str in row_dict.copy():
+                date = date_parser(date_str).strftime('%Y-%m-%d')
+                data = row_dict.pop(date_str).strip()
+                data = int(data or 0) if '(' not in data else [int(x) for x in data.strip(')').split('(')]
+                row_dict.setdefault(date, data)
+            row_dict.setdefault('region', admin3 or admin2)
+            if admin3:
+                row_dict.setdefault('country', admin2)
+            if admin1:
+                row_dict.setdefault('status' if admin1 in ('Deaths', 'Confirmed') else 'state', admin1)
+            print(row_dict)
+
     def __get_data(self, filename):
         with open(filename, 'r') as f:
             return json.load(f)
@@ -246,6 +269,83 @@ class Covid19(GitHub):
         else:
             print(f"unknown country ({target})")
 
+
+class SpainCovid19(GitHub):
+    def __init__(self, owner, repo):
+        GitHub.__init__(self, owner, repo)
+        self.autonomies = set()
+
+    def download_data(self):
+        path = 'data/'
+        dates = {}
+        for file in self.get_file_list(path):
+            if re.match(r'covi\d+\.csv', file['name']):
+                csv_reader = csv.DictReader(covid19.get_raw_file(file['download_url']).splitlines())
+                date = datetime.datetime.strptime(file['name'], 'covi%d%m.csv').replace(year=2020).strftime("%Y-%m-%d")
+                dates.update({date: {}})
+                cases_amt = 0
+                acc_inc_amt = 0
+                uci_amt = 0
+                deaths_amt = 0
+                hosp_amt = 0
+                new_amt = 0
+                recovered_amt = 0
+                for row_dict in csv_reader:
+                    cases = int(row_dict['Casos'])
+                    acc_inc = float(row_dict['IA'])
+                    uci = int(row_dict['UCI'])
+                    deaths = int(row_dict['Fallecidos'])
+                    hosp = int(row_dict.get('Hospitalizados', 0))
+                    new = int(row_dict.get('Nuevos', 0))
+                    recovered = int(row_dict.get('Curados', 0))
+                    dates[date][row_dict['ID']] = {
+                        'id': int(row_dict['ID']),
+                        'ca': row_dict['CCAA'],
+                        'cases': cases,
+                        'acc_inc': acc_inc,
+                        'uci': uci,
+                        'deaths': deaths,
+                        'hosp': hosp,
+                        'new': new,
+                        'recovered': recovered
+                    }
+                    cases_amt += cases
+                    acc_inc_amt += acc_inc
+                    uci_amt += uci
+                    deaths_amt += deaths
+                    hosp_amt += hosp
+                    new_amt += new
+                    recovered_amt += recovered
+                dates[date]['Total'] = {
+                    'cases': cases_amt,
+                    'acc_inc': acc_inc_amt,
+                    'uci': uci_amt,
+                    'deaths': deaths_amt,
+                    'hosp': hosp_amt,
+                    'new': new_amt,
+                    'recovered': recovered_amt
+                }
+        self.autonomies = [dates[date][c]['ca'] for c in dates[date] if c != 'Total']
+        return dates
+
+    def save_data(self):
+        data = self.download_data()
+        places = {}
+        for aut in self.autonomies:
+            places[aut] = {'dates': {}}
+        places['Total'] = {'dates': {}}
+        for date in data:
+            for aut in data[date]:
+                if data[date][aut].get('ca'):
+                    aut_name = data[date][aut]['ca']
+                    places[aut_name]['dates'][date] = dict(
+                        filter(lambda item: isinstance(item[1], (float,int)), data[date][aut].items())
+                    )
+            places['Total']['dates'][date] = data[date]['Total']
+        with open('./data/spain.json', 'w') as f:
+            json.dump(places, f, indent=4, sort_keys=True)
+
+
 def __main():
     import argparse
     argparser = argparse.ArgumentParser()
@@ -253,6 +353,7 @@ def __main():
     argparser.add_argument('-c', dest='country')
     argparser.add_argument('-u', dest='update', action='store_true')
     argparser.add_argument('-w', dest='worldometers', action='store_true')
+    argparser.add_argument('-W', dest='who', action='store_true')
     args = argparser.parse_args()
 
     if args.update:
@@ -262,6 +363,10 @@ def __main():
     elif args.country:
         covid19.load_time_series_data()
         covid19.get_country_stats(args.country)
+
+    if args.who:
+        covid19.download_who_time_series()
+
     if args.worldometers:
         worldometers = Worldometers()
         worldometers.get_tables()
@@ -271,4 +376,6 @@ if __name__ == '__main__':
     g_owner = "CSSEGISandData"
     g_repo = "COVID-19"
     covid19 = Covid19(g_owner, g_repo)
-    __main()
+    spain_covid19 = SpainCovid19('Eclectikus',g_repo)
+    spain_covid19.save_data()
+    #__main()
